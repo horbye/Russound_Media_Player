@@ -1,29 +1,39 @@
-# Russound Media Player for Home Assistant
+# Russound Media Player (Source Mode) for Home Assistant
 
-This integration allows you to control Russound streaming devices (such as the MBX-PRE and MBX-AMP) directly from Home Assistant using the Russound RIO (TCP/IP) protocol.
+A professional Home Assistant integration designed to control **Russound Media Streamers** (like the MBX-PRE and MBX-AMP) using the RIO (TCP/IP) protocol. 
 
-It is specifically designed for users running their Russound units in **Source Mode**, providing a clean interface focused on media information and transport control.
+This integration is optimized for **Source Mode**, providing detailed metadata and transport control for your streaming sources.
 
-## Key Features
-* **Real-time Metadata:** Instantly fetches Song Title, Artist, and Album info.
-* **High Performance:** Updates every second to ensure the dashboard is always in sync with the device.
-* **Dynamic Iconry:** Automatically changes the entity icon based on the active streaming provider (Spotify, AirPlay, Internet Radio, etc.).
-* **Full Transport Control:** Play, Pause, Stop, Next/Previous Track.
-* **Smart Logic:** Support for Shuffle and Repeat modes.
-* **Easy Setup:** Full support for Home Assistant Config Flow (no YAML required).
+## Features
+* **Full Metadata Sync:** Real-time display of Song Title, Artist, and Album.
+* **Cover Art Support:** Automatically fetches and displays album art directly from the Russound streamer.
+* **Extended Info:** View "Radio Text", "Playlist Name", and "Channel Name" as extra entity attributes.
+* **Dynamic Icons:** The entity icon automatically changes based on the source (Spotify, AirPlay, Radio, or Bluetooth).
+* **Transport Controls:** Play, Pause, Stop, Next/Previous, Shuffle, and Repeat.
+* **User-Defined Naming:** Custom name assignment during setup for easy identification in your dashboard.
 
 ## Installation
 
 ### Manual Installation
-1. Download the `russound_media_player` folder from this repository.
-2. Copy the folder into your Home Assistant `custom_components` directory.
+1. Download this repository.
+2. Copy the `russound_media_player` folder into your Home Assistant `custom_components` directory.
 3. Restart Home Assistant.
-4. Go to **Settings** -> **Devices & Services** -> **Add Integration**.
-5. Search for **Russound Media Player**.
-6. Enter your device's IP address (e.g., `192.168.40.102`), Port (`9621`), and the Source number (e.g., `5`).
 
-## Technical Details
-The integration communicates via Telnet on port 9621. By default, it skips volume control as this is typically handled by the downstream amplifier in a high-end Source Mode setup.
+### Configuration
+1. Navigate to **Settings** > **Devices & Services**.
+2. Click **Add Integration** and search for **Russound Media Player**.
+3. Fill in the following details:
+   * **Host:** The IP address of your Russound device.
+   * **Port:** Default is `9621`.
+   * **Source:** The source number you wish to control (e.g., `5`).
+   * **Name:** Your preferred display name (e.g., "Media Streamer").
+
+## Supported Metadata Keys
+The integration pulls data from the Russound RIO Source GET Key Table, including:
+* `songName`, `artistName`, `albumName`
+* `coverArtURL`
+* `radioText`, `playlistName`, `channelName`
+* `playStatus`, `shuffleMode`, `repeatMode`
 
 ---
 **Developed by [@horbye](https://github.com/horbye)**
