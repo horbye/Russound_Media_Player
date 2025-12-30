@@ -1,6 +1,6 @@
 # Russound Media Player (Source Mode) for Home Assistant
 
-A professional Home Assistant integration designed to control **Russound Media Streamers** (like the MBX-PRE and MBX-AMP) using the RIO (TCP/IP) protocol. 
+A Home Assistant integration designed to control **Russound Media Streamers** (like the MBX-PRE and MBX-AMP) using the RIO (TCP/IP) protocol. 
 
 This integration is optimized for **Source Mode**, providing detailed metadata and transport control for your streaming sources.
 
