@@ -1,0 +1,10 @@
+{
+  "domain": "russound_media_player",
+  "name": "Russound Media Player",
+  "version": "1.0.0",
+  "documentation": "https://github.com/horbye/Russound_Media_Player",
+  "codeowners": ["@horbye"],
+  "iot_class": "local_polling",
+  "is_built_in": false,
+  "config_flow": true
+}
