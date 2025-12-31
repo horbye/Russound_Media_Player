@@ -7,7 +7,7 @@ This integration is optimized for **Source Mode**, providing detailed metadata a
 ## Features
 * **Full Metadata Sync:** Real-time display of Song Title, Artist, and Album.
 * **Cover Art Support:** Automatically fetches and displays album art directly from the Russound streamer.
-* **Extended Info:** View "Radio Text", "Playlist Name", and "Channel Name" as extra entity attributes.
+* **Extended Info:** View "Playlist Name", and "Channel Name" as extra entity attributes.
 * **Dynamic Icons:** The entity icon automatically changes based on the source (Spotify, AirPlay, Radio, or Bluetooth).
 * **Transport Controls:** Play, Pause, Stop, Next/Previous, Shuffle, and Repeat.
 * **User-Defined Naming:** Custom name assignment during setup for easy identification in your dashboard.
