@@ -22,6 +22,6 @@ class RussoundConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Required(CONF_HOST, default="192.168.40.102"): str,
                 vol.Required(CONF_PORT, default=9621): int,
                 vol.Required(CONF_SOURCE, default=5): int,
-                vol.Required(CONF_NAME, default="Russound MBX"): str,
+                vol.Required(CONF_NAME, default="Russound Media Player"): str,
             })
         )
