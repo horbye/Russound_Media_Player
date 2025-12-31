@@ -24,7 +24,7 @@ This integration is optimized for **Source Mode**, providing detailed metadata a
 2. Click **Add Integration** and search for **Russound Media Player**.
 3. Fill in the following details:
    * **Host:** The IP address of your Russound device.
-   * **Port:** Default is `9621`.
+   * **Port:** Default is `9621 or 9622`.
    * **Source:** The source number you wish to control (e.g., `5`).
    * **Name:** Your preferred display name (e.g., "Media Streamer").
 
