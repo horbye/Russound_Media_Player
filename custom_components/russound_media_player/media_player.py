@@ -1,134 +1,216 @@
-import socket
+import asyncio
 import logging
-import time
-from datetime import timedelta
 from homeassistant.components.media_player import (
     MediaPlayerEntity,
     MediaPlayerEntityFeature,
-    MediaPlayerState,
-    RepeatMode
+    MediaPlayerState
 )
 from homeassistant.const import CONF_HOST, CONF_PORT, CONF_SOURCE, CONF_NAME
 from homeassistant.util import dt as dt_util
 
 _LOGGER = logging.getLogger(__name__)
-SCAN_INTERVAL = timedelta(seconds=1)
 
 async def async_setup_entry(hass, config_entry, async_add_entities):
+    """Set up the Russound platform from a config entry."""
     config = config_entry.data
-    display_name = config.get(CONF_NAME, "Russound MBX")
-    async_add_entities([
-        RussoundSourceEntity(
-            config[CONF_HOST], 
-            config[CONF_PORT], 
-            config[CONF_SOURCE],
-            display_name
-        )
-    ])
+    entity = RussoundSourceEntity(
+        config[CONF_HOST], 
+        config[CONF_PORT], 
+        config[CONF_SOURCE], 
+        config.get(CONF_NAME, "Russound Media Player")
+    )
+    async_add_entities([entity])
 
 class RussoundSourceEntity(MediaPlayerEntity):
+    """Russound Media Player Entity with Watchdog and Robust Metadata Parsing."""
+    
+    _attr_should_poll = False 
+
     def __init__(self, ip, port, source, display_name):
-        self._ip = ip
-        self._port = port
-        self._source = source
+        """Initialize the entity state and configuration."""
+        self._ip, self._port, self._source = ip, port, source
         self._attr_name = display_name 
-        # Dette sikrer, at entiteten kan administreres i UI
         self._attr_unique_id = f"russound_{ip.replace('.', '_')}_source_{source}"
-        self._attr_available = True 
         
+        self._reader = self._writer = self._main_task = self._heartbeat_task = None
+        self._cmd_queue = asyncio.Queue()
+        
+        # State attributes
         self._streaming_provider = "Unknown"
-        self._radio_text = None
+        self._attr_state = MediaPlayerState.OFF
+        self._attr_media_title = self._attr_media_artist = self._attr_media_image_url = None
+        self._attr_media_duration = self._attr_media_position = self._attr_media_position_updated_at = None
+        self._attr_shuffle = False
+        self._attr_repeat_mode = "OFF"
         
+        # Supported features (Volume control excluded)
         self._attr_supported_features = (
-            MediaPlayerEntityFeature.PLAY | 
-            MediaPlayerEntityFeature.PAUSE | 
-            MediaPlayerEntityFeature.STOP |
-            MediaPlayerEntityFeature.NEXT_TRACK |
-            MediaPlayerEntityFeature.PREVIOUS_TRACK |
-            MediaPlayerEntityFeature.BROWSE_MEDIA |
-            MediaPlayerEntityFeature.SEEK | 
-            MediaPlayerEntityFeature.SHUFFLE_SET |
-            MediaPlayerEntityFeature.REPEAT_SET
+            MediaPlayerEntityFeature.PLAY | MediaPlayerEntityFeature.PAUSE | 
+            MediaPlayerEntityFeature.STOP | MediaPlayerEntityFeature.NEXT_TRACK | 
+            MediaPlayerEntityFeature.PREVIOUS_TRACK | MediaPlayerEntityFeature.SEEK | 
+            MediaPlayerEntityFeature.SHUFFLE_SET
         )
+
+        # Device info for Home Assistant UI and Brand Icon
+        self._attr_device_info = {
+            "identifiers": {("russound", f"{ip}_{source}")},
+            "name": display_name,
+            "manufacturer": "Russound",
+            "model": "Russound Media Player"
+        }
+
+    @property
+    def shuffle(self):
+        """Return current shuffle state."""
+        return self._attr_shuffle
 
     @property
     def extra_state_attributes(self):
+        """Return streaming provider and repeat mode."""
         return {
-            "streaming_provider": self._streaming_provider,
-            "radio_text": self._radio_text,
-            "last_synced": time.strftime("%H:%M:%S")
+            "streaming_provider": self._streaming_provider, 
+            "repeat_status": self._attr_repeat_mode
         }
 
-    def send_command(self, cmd_string):
-        try:
-            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                s.settimeout(0.8)
-                s.connect((self._ip, self._port))
-                s.sendall(f"{cmd_string}\r\n".encode())
-                response = s.recv(1024).decode().strip()
-                self._attr_available = True 
-                return response
-        except (socket.timeout, OSError):
-            self._attr_available = False 
-            return None
+    async def async_added_to_hass(self):
+        """Start background tasks when added to Home Assistant."""
+        self._main_task = asyncio.create_task(self._io_loop())
+        self._heartbeat_task = asyncio.create_task(self._heartbeat_loop())
 
-    def _parse(self, response):
-        if not response or "E " in response: return None
-        if "=" in response:
-            response = response.split('=', 1)[1]
-        return response.replace('"', '').strip()
+    async def async_will_remove_from_hass(self):
+        """Clean up background tasks on removal."""
+        if self._main_task: self._main_task.cancel()
+        if self._heartbeat_task: self._heartbeat_task.cancel()
+        await self._close_connection()
 
-    def update(self):
-        status = self.send_command(f"GET S[{self._source}].playStatus")
-        
-        if status:
-            song = self.send_command(f"GET S[{self._source}].songName")
-            artist = self.send_command(f"GET S[{self._source}].artistName")
-            provider = self.send_command(f"GET S[{self._source}].mode")
-            cover = self.send_command(f"GET S[{self._source}].coverArtURL")
-            cur_pos = self.send_command(f"GET S[{self._source}].playTime")
-            dur_time = self.send_command(f"GET S[{self._source}].trackTime")
-            shuffle_stat = self.send_command(f"GET S[{self._source}].shuffleMode")
-            repeat_stat = self.send_command(f"GET S[{self._source}].repeatMode")
+    async def _close_connection(self):
+        """Close TCP sockets and reset availability."""
+        if self._writer:
+            self._writer.close()
+            try: await self._writer.wait_closed()
+            except: pass
+        self._reader = self._writer = None
+        self._attr_available = False
+        self.async_write_ha_state()
 
-            self._attr_media_title = self._parse(song)
-            self._attr_media_artist = self._parse(artist)
-            self._streaming_provider = self._parse(provider)
-            self._attr_media_content_type = "music"
-            
+    async def _queue_metadata_refresh(self):
+        """Request all relevant track metadata fields."""
+        fields = ["playStatus", "songName", "artistName", "mode", "coverArtURL", 
+                  "playTime", "trackTime", "shuffleMode", "repeatMode"]
+        for field in fields:
+            await self._cmd_queue.put(f"GET S[{self._source}].{field}")
+
+    async def _heartbeat_loop(self):
+        """Independent task to maintain state sync while playing."""
+        while True:
             try:
-                p_val = self._parse(cur_pos)
-                d_val = self._parse(dur_time)
-                if p_val and d_val:
-                    self._attr_media_position = int(p_val)
-                    self._attr_media_duration = int(d_val)
-                    self._attr_media_position_updated_at = dt_util.utcnow()
+                if self._attr_available and self._attr_state == MediaPlayerState.PLAYING:
+                    await self._queue_metadata_refresh()
+            except Exception as err:
+                _LOGGER.debug("Heartbeat skipped: %s", err)
+            await asyncio.sleep(2)
+
+    async def _io_loop(self):
+        """Main connection loop with sequential handling to prevent read conflicts."""
+        while True:
+            try:
+                _LOGGER.info("Connecting to Russound at %s:%s", self._ip, self._port)
+                self._reader, self._writer = await asyncio.wait_for(
+                    asyncio.open_connection(self._ip, self._port), 
+                    timeout=15
+                )
+                self._attr_available = True
+                
+                # Register for updates and perform initial sync
+                self._writer.write(f"WATCH S[{self._source}] ON\r\n".encode())
+                await self._writer.drain()
+                await self._queue_metadata_refresh()
+
+                while True:
+                    try:
+                        # Sequential reading prevents 'readuntil' conflicts
+                        # 60s timeout acts as a watchdog
+                        line = await asyncio.wait_for(self._reader.readline(), timeout=60.0)
+                        
+                        if not line:
+                            break 
+                        
+                        self._parse_response(line.decode().strip())
+                        self.async_write_ha_state()
+
+                        # Process command queue after each read
+                        while not self._cmd_queue.empty():
+                            cmd = self._cmd_queue.get_nowait()
+                            if self._writer:
+                                self._writer.write(f"{cmd}\r\n".encode())
+                                await self._writer.drain()
+
+                    except asyncio.TimeoutError:
+                        _LOGGER.warning("Connection watchdog timeout (60s silence). Reconnecting...")
+                        break
+
+            except (asyncio.TimeoutError, Exception) as err:
+                _LOGGER.error("Russound connection lost: %s. Retrying in 30s...", err)
+                self._attr_available = False
+                self.async_write_ha_state()
+                await self._close_connection()
+                await asyncio.sleep(30)
+
+    def _parse_response(self, resp):
+        """Robust parser to handle RIO response variations and system status."""
+        if "=" not in resp: return
+        raw_upper = resp.upper()
+        parts = resp.split('=', 1)
+        val = parts[1].replace('"', '').strip()
+        val_upper = val.upper()
+
+        # Check for system status to ensure availability
+        if "SYSTEM.STATUS" in raw_upper:
+            if "ON" in val_upper:
+                self._attr_available = True
+
+        if "SHUFFLEMODE" in raw_upper:
+            self._attr_shuffle = ("ON" in val_upper)
+        elif "REPEATMODE" in raw_upper:
+            self._attr_repeat_mode = val
+        elif ".MODE" in raw_upper:
+            self._streaming_provider = val
+        elif "PLAYSTATUS" in raw_upper:
+            if "PLAYING" in val_upper: self._attr_state = MediaPlayerState.PLAYING
+            elif "PAUSED" in val_upper: self._attr_state = MediaPlayerState.PAUSED
+            else: self._attr_state = MediaPlayerState.IDLE
+        elif "SONGNAME" in raw_upper: self._attr_media_title = val
+        elif "ARTISTNAME" in raw_upper: self._attr_media_artist = val
+        elif "COVERARTURL" in raw_upper:
+            self._attr_media_image_url = val if val.startswith("http") else None
+        elif "PLAYTIME" in raw_upper:
+            try:
+                self._attr_media_position = int(val)
+                self._attr_media_position_updated_at = dt_util.utcnow()
+            except: pass
+        elif "TRACKTIME" in raw_upper:
+            try: self._attr_media_duration = int(val)
             except: pass
 
-            self._attr_shuffle = (self._parse(shuffle_stat) == "ON")
-            self._attr_repeat_mode = RepeatMode.ALL if self._parse(repeat_stat) == "ON" else RepeatMode.OFF
+    # Control logic helpers
+    async def _send_event(self, event):
+        """Send key event and force a metadata update."""
+        await self._cmd_queue.put(f"EVENT S[{self._source}]!KeyRelease {event}")
+        await asyncio.sleep(0.5)
+        await self._queue_metadata_refresh()
 
-            # Viser album coveret korrekt i UI
-            c_url = self._parse(cover)
-            self._attr_media_image_url = c_url if c_url and c_url.startswith("http") else None
-            
-            stat_clean = status.lower()
-            if "playing" in stat_clean: self._attr_state = MediaPlayerState.PLAYING
-            elif "paused" in stat_clean: self._attr_state = MediaPlayerState.PAUSED
-            else: self._attr_state = MediaPlayerState.IDLE
-        else:
-            self._attr_state = MediaPlayerState.OFF
-
-    def media_play(self): self.send_command(f"EVENT S[{self._source}]!KeyRelease Play")
-    def media_pause(self): self.send_command(f"EVENT S[{self._source}]!KeyRelease Pause")
-    def media_stop(self): self.send_command(f"EVENT S[{self._source}]!KeyRelease Stop")
-    def media_next_track(self): self.send_command(f"EVENT S[{self._source}]!KeyRelease Next")
-    def media_previous_track(self): self.send_command(f"EVENT S[{self._source}]!KeyRelease Previous")
+    async def async_media_play(self): await self._send_event("Play")
+    async def async_media_pause(self): await self._send_event("Pause")
+    async def async_media_stop(self): await self._send_event("Stop")
+    async def async_media_next_track(self): await self._send_event("Next")
+    async def async_media_previous_track(self): await self._send_event("Previous")
     
-    def set_shuffle(self, shuffle):
-        cmd = "ShuffleOn" if shuffle else "ShuffleOff"
-        self.send_command(f"EVENT S[{self._source}]!KeyRelease {cmd}")
+    async def async_set_shuffle(self, shuffle):
+        """Toggle shuffle and verify the new state."""
+        await self._cmd_queue.put(f"EVENT S[{self._source}]!KeyRelease Shuffle")
+        await asyncio.sleep(0.5)
+        await self._cmd_queue.put(f"GET S[{self._source}].shuffleMode")
 
-    def set_repeat_mode(self, repeat_mode):
-        cmd = "RepeatOn" if repeat_mode != RepeatMode.OFF else "RepeatOff"
-        self.send_command(f"EVENT S[{self._source}]!KeyRelease {cmd}")
+    async def async_media_seek(self, position):
+        """Set track position via RIO event."""
+        await self._cmd_queue.put(f"EVENT S[{self._source}]!SetSeekTime {int(position)}")
