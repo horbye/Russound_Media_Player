@@ -74,8 +74,15 @@ class RussoundSourceEntity(MediaPlayerEntity):
 
     async def async_added_to_hass(self):
         """Start background tasks when added to Home Assistant."""
+        # Cancel existing tasks if they are already running to prevent double-connections
+        if self._main_task and not self._main_task.done():
+            self._main_task.cancel()
         self._main_task = asyncio.create_task(self._io_loop())
+
+        if self._heartbeat_task and not self._heartbeat_task.done():
+            self._heartbeat_task.cancel()
         self._heartbeat_task = asyncio.create_task(self._heartbeat_loop())
+
 
     async def async_will_remove_from_hass(self):
         """Clean up background tasks on removal."""
