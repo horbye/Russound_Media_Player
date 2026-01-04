@@ -1,0 +1,18 @@
+{
+  "config": {
+    "error": {
+      "cannot_connect": "Kunne ikke forbinde til enheden på angivne port(e).",
+      "no_streamers_found": "Kunne forbinde, men fandt ingen 'Russound Media Streamer' sources. Tjek at du bruger controllerens IP/port."
+    },
+    "step": {
+      "user": {
+        "title": "Russound controller",
+        "data": {
+          "host": "Controller IP",
+          "port": "Port (valgfri)",
+          "name": "Navn"
+        }
+      }
+    }
+  }
+}
