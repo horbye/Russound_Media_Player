@@ -3,8 +3,8 @@
 An advanced Home Assistant integration designed to control **Russound Media Streamers** using the RIO (TCP/IP) protocol. 
 
 This integration operates in **Source Mode**, providing deep metadata synchronization and full transport control directly at the source level. It has been verified and tested on the following hardware:
-* **XSource** Streaming Audio Player
-* **MBX-PRE** & **MBX-AMP** Wi-Fi Streaming Series
+* **XSource** 
+* **MBX-PRE** 
 * **MCA-88X** Multi-Zone Controller (Internal Streamer)
 
 ## Features
