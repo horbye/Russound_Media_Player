@@ -1,8 +1,11 @@
 # Russound Media Player (Source Mode) for Home Assistant
 
-An advanced Home Assistant integration designed to control **Russound Media Streamers** (e.g., MBX-PRE, MBX-AMP, and MCA-series controllers) using the RIO (TCP/IP) protocol.
+An advanced Home Assistant integration designed to control **Russound Media Streamers** using the RIO (TCP/IP) protocol. 
 
-This integration operates in **Source Mode**, providing deep metadata synchronization and full transport control directly at the source level.
+This integration operates in **Source Mode**, providing deep metadata synchronization and full transport control directly at the source level. It has been verified and tested on the following hardware:
+* **XSource** Streaming Audio Player
+* **MBX-PRE** & **MBX-AMP** Wi-Fi Streaming Series
+* **MCA-88X** Multi-Zone Controller (Internal Streamer)
 
 ## Features
 * **Real-Time Metadata:** Instant sync of Song Title, Artist, and Album Name.
@@ -17,17 +20,17 @@ This integration operates in **Source Mode**, providing deep metadata synchroniz
 
 ### Manual Installation
 1. Download this repository.
-2. Copy the `russound_source` folder (or your chosen directory name) into your Home Assistant `custom_components` directory.
+2. Copy the `russound_source` folder into your Home Assistant `custom_components` directory.
 3. Restart Home Assistant.
 
 ### Configuration
 1. Navigate to **Settings** > **Devices & Services**.
 2. Click **Add Integration** and search for **Russound Media Player**.
-3. Fill in the following details:
+3. Fill in the details for your **XSource**, **MBX**, or **MCA** device:
     * **Host:** The IP address of your Russound device.
-    * **Port:** Default is `9621` (Standard RIO port).
+    * **Port:** Default is `9621`.
     * **Source:** The source number you wish to control (e.g., `1`).
-    * **Name:** Your preferred display name (e.g., "Living Room Streamer").
+    * **Name:** Your preferred display name (e.g., "Kitchen Streamer").
 
 ## Advanced Logic
 * **Queue-Based Communication:** Commands are processed through an internal queue (`cmd_q`) to prevent race conditions and ensure stability during network latency.
