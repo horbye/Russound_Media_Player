@@ -26,11 +26,7 @@ This integration operates in **Source Mode**, providing deep metadata synchroniz
 ### Configuration
 1. Navigate to **Settings** > **Devices & Services**.
 2. Click **Add Integration** and search for **Russound Media Player**.
-3. Fill in the details for your **XSource**, **MBX**, or **MCA** device:
-    * **Host:** The IP address of your Russound device.
-    * **Port:** Default is `9621`.
-    * **Source:** The source number you wish to control (e.g., `1`).
-    * **Name:** Your preferred display name (e.g., "Kitchen Streamer").
+3. Fill in the details for your Controller/Amp and it will scan the sources for valid streamers and set these up as devices
 
 ## Advanced Logic
 * **Queue-Based Communication:** Commands are processed through an internal queue (`cmd_q`) to prevent race conditions and ensure stability during network latency.
