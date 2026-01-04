@@ -36,6 +36,9 @@ REFRESH_INTERVAL_PLAYING_S = 8.0
 REFRESH_INTERVAL_IDLE_S = 30.0
 RECONNECT_DELAY_S = 10.0
 
+# NEW: når bruger trykker en knap, prøv at connecte hurtigt
+COMMAND_CONNECT_TIMEOUT_S = 3.0
+
 MANUAL_STATE_HOLD_SECONDS = 10.0
 LEGACY_VERSION_CUTOFF = (1, 14, 0)
 
@@ -200,7 +203,6 @@ async def _discover_streamer_sources(controller_host: str, controller_port: int,
             ip_raw = (sources[i].get("ipaddress") or "").strip()
             name = (sources[i].get("name") or "").strip()
 
-            # Brug controllerens navn (selv "Source 7" osv er OK hvis den faktisk er konfigureret streamer)
             if not name:
                 name = f"Source {i}"
 
@@ -252,7 +254,6 @@ def _prune_stale_registry(
     ent_reg = er.async_get(hass)
     dev_reg = dr.async_get(hass)
 
-    # 1) Entity cleanup
     for entry in list(ent_reg.entities.values()):
         if entry.config_entry_id != config_entry.entry_id:
             continue
@@ -262,7 +263,6 @@ def _prune_stale_registry(
             _LOGGER.warning("Removing stale entity from registry: %s (unique_id=%s)", entry.entity_id, entry.unique_id)
             ent_reg.async_remove(entry.entity_id)
 
-    # 2) Device cleanup (kun devices uden entities)
     for device in list(dev_reg.devices.values()):
         if config_entry.entry_id not in device.config_entries:
             continue
@@ -411,6 +411,9 @@ class RussoundSourceEntity(MediaPlayerEntity):
         # ✅ NYT: hvis playStatus er tom streng på denne streamer, så brug playlist-transport som fallback
         self._playstatus_blank_seen: bool = False
 
+        # NEW: serialiser connect/write fra knapper + loop
+        self._io_lock = asyncio.Lock()
+
         self._attr_available = False
         self._attr_state = MediaPlayerState.OFF
 
@@ -523,6 +526,33 @@ class RussoundSourceEntity(MediaPlayerEntity):
                 self._attr_state = MediaPlayerState.OFF
         return True
 
+    async def _ensure_connected_for_command(self) -> bool:
+        """
+        Sørg for at der er en aktiv forbindelse når brugeren trykker en knap.
+        Tidligere returnerede _send_event bare hvis der ikke var forbindelse => "døde" knapper.
+        """
+        # væk active_loop hvis den venter
+        self._active_event.set()
+
+        if self._connected():
+            return True
+
+        async with self._io_lock:
+            if self._connected():
+                return True
+            try:
+                await asyncio.wait_for(self._connect_active(), timeout=COMMAND_CONNECT_TIMEOUT_S)
+                self._attr_available = True
+                if self._attr_state == MediaPlayerState.OFF:
+                    self._attr_state = MediaPlayerState.IDLE
+                self.async_write_ha_state()
+                return True
+            except Exception as err:
+                _LOGGER.warning("Command connect failed to %s:%s (S[%s]): %s", self._host, self._port, self._source, err)
+        # udenfor lock
+        await self._close()
+        return False
+
     # ---------- legacy pause->idle ----------
     def _cancel_pause_to_idle(self):
         if self._task_pause_to_idle:
@@ -565,13 +595,12 @@ class RussoundSourceEntity(MediaPlayerEntity):
         title = (self._attr_media_title or "").strip()
         title_up = title.upper()
 
-        # --- Placeholder / "status" tekster der IKKE betyder playback ---
         placeholder_playlist_tokens = (
-            "PLEASE WAIT",        # "Please Wait..."
+            "PLEASE WAIT",  # "Please Wait..."
         )
         placeholder_title_tokens = (
-            "CONNECTING TO MEDIA SOURCE",  # "Connecting to media source."
-            "PLEASE MAKE A SELECTION",     # klassiker når intet spiller
+            "CONNECTING TO MEDIA SOURCE",
+            "PLEASE MAKE A SELECTION",
             "PLEASE WAIT",
         )
 
@@ -622,15 +651,11 @@ class RussoundSourceEntity(MediaPlayerEntity):
                 self._attr_state = MediaPlayerState.PLAYING
                 return True
         else:
-            # Hvis vi har "Spotify" i playlist men ingen title endnu, så er vi stadig i "mellem-state"
             if self._attr_state != MediaPlayerState.IDLE:
                 self._attr_state = MediaPlayerState.IDLE
                 return True
 
         return False
-
-
-
 
     # ---------- HA ----------
     @property
@@ -672,14 +697,15 @@ class RussoundSourceEntity(MediaPlayerEntity):
 
     async def _close(self):
         self._cancel_pause_to_idle()
-        if self._writer:
-            self._writer.close()
-            try:
-                await self._writer.wait_closed()
-            except Exception:
-                pass
-        self._reader = None
-        self._writer = None
+        async with self._io_lock:
+            if self._writer:
+                self._writer.close()
+                try:
+                    await self._writer.wait_closed()
+                except Exception:
+                    pass
+            self._reader = None
+            self._writer = None
 
     # ---------- bootstrap / probe ----------
     async def _bootstrap(self):
@@ -810,7 +836,9 @@ class RussoundSourceEntity(MediaPlayerEntity):
 
                 if not self._connected():
                     try:
-                        await self._connect_active()
+                        async with self._io_lock:
+                            if not self._connected():
+                                await self._connect_active()
                         self._attr_available = True
                         if self._attr_state == MediaPlayerState.OFF:
                             self._attr_state = MediaPlayerState.IDLE
@@ -834,10 +862,14 @@ class RussoundSourceEntity(MediaPlayerEntity):
                         if self._parse_message(text):
                             self.async_write_ha_state()
 
+                    # flush queue
                     while self._connected() and (not self._cmd_q.empty()):
                         cmd = self._cmd_q.get_nowait()
-                        self._writer.write(f"{cmd}\r\n".encode("utf-8"))
-                        await self._writer.drain()
+                        async with self._io_lock:
+                            if not self._connected():
+                                break
+                            self._writer.write(f"{cmd}\r\n".encode("utf-8"))
+                            await self._writer.drain()
                         await asyncio.sleep(0.01)
 
                 await self._close()
@@ -899,20 +931,22 @@ class RussoundSourceEntity(MediaPlayerEntity):
 
         if key_u == "SYSTEM.STATUS":
             new = val_u or None
+            changed = False
             if new != self._system_status:
                 self._system_status = new
-                return True
-            return False
+                changed = True
+            # IMPORTANT: opdater awake mens vi er connected (så den kan disconnecte automatisk)
+            if self._set_awake(new == "ON"):
+                changed = True
+            return changed
 
         # ---- PLAYSTATUS: hvis den er tom, så switch til playlist-transport ----
         if key_u.endswith(".PLAYSTATUS") and (not self._manual_hold()):
-            # Tom streng => playStatus er ubrugelig på denne streamer
             if not (val or "").strip():
                 changed = False
                 if not self._playstatus_blank_seen:
                     self._playstatus_blank_seen = True
                     changed = True
-                # forsøg at anvende playlist transport straks (hvis vi allerede har playlist/title)
                 if self._apply_playlist_transport():
                     changed = True
                 return changed
@@ -929,7 +963,6 @@ class RussoundSourceEntity(MediaPlayerEntity):
                     return True
                 return False
 
-            # Hvis vi har set blank playStatus før, så stoler vi ikke på STOP/IDLE her (playlist styrer)
             if ("STOP" in val_u or "IDLE" in val_u) and not self._playstatus_blank_seen:
                 if self._attr_state != MediaPlayerState.IDLE:
                     self._attr_state = MediaPlayerState.IDLE
@@ -1014,11 +1047,14 @@ class RussoundSourceEntity(MediaPlayerEntity):
 
     # ---------- commands ----------
     async def _send_event(self, key: str):
-        if not self._connected():
+        ok = await self._ensure_connected_for_command()
+        if not ok or not self._connected():
             return
-        await self._cmd_q.put(f"EVENT S[{self._source}]!KeyRelease {key}")
-        await asyncio.sleep(0.25)
+
+        cmd = f"EVENT S[{self._source}]!KeyRelease {key}"
+        self._cmd_q.put_nowait(cmd)
         await self._queue_refresh()
+
 
     async def async_media_play(self):
         self._set_state_manual(MediaPlayerState.PLAYING)
@@ -1048,9 +1084,18 @@ class RussoundSourceEntity(MediaPlayerEntity):
         await self._send_event("Shuffle")
 
     async def async_media_seek(self, position: float):
-        if not self._connected():
+        ok = await self._ensure_connected_for_command()
+        if not ok or not self._connected():
             return
-        await self._cmd_q.put(f"EVENT S[{self._source}]!SetSeekTime {int(position)}")
+
+        cmd = f"EVENT S[{self._source}]!SetSeekTime {int(position)}"
+        async with self._io_lock:
+            if not self._connected():
+                return
+            self._writer.write(f"{cmd}\r\n".encode("utf-8"))
+            await self._writer.drain()
+
         self._attr_media_position = int(position)
         self._attr_media_position_updated_at = dt_util.utcnow()
         self.async_write_ha_state()
+        await self._queue_refresh()
