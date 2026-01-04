@@ -1,39 +1,46 @@
 # Russound Media Player (Source Mode) for Home Assistant
 
-A Home Assistant integration designed to control **Russound Media Streamers** (like the MBX-PRE and MBX-AMP) using the RIO (TCP/IP) protocol. 
+An advanced Home Assistant integration designed to control **Russound Media Streamers** (e.g., MBX-PRE, MBX-AMP, and MCA-series controllers) using the RIO (TCP/IP) protocol.
 
-This integration is optimized for **Source Mode**, providing detailed metadata and transport control for your streaming sources.
+This integration operates in **Source Mode**, providing deep metadata synchronization and full transport control directly at the source level.
 
 ## Features
-* **Full Metadata Sync:** Real-time display of Song Title, Artist, and Album.
-* **Cover Art Support:** Automatically fetches and displays album art directly from the Russound streamer.
-* **Extended Info:** View "Playlist Name", and "Channel Name" as extra entity attributes.
-* **Dynamic Icons:** The entity icon automatically changes based on the source (Spotify, AirPlay, Radio, or Bluetooth).
+* **Real-Time Metadata:** Instant sync of Song Title, Artist, and Album Name.
+* **Cover Art Support:** Automatically fetches and displays high-resolution album art directly from the Russound streamer.
+* **Smart State Management:** Intelligent handling of "IDLE" vs "OFF" states based on real-time system status.
+* **Resilient Connectivity:** Advanced reconnection logic that keeps the session alive or wakes it instantly upon user interaction.
+* **Legacy Support:** Optimized refresh intervals and compatibility for older Russound hardware (e.g., MCA-series).
 * **Transport Controls:** Play, Pause, Stop, Next/Previous, Shuffle, and Repeat.
-* **User-Defined Naming:** Custom name assignment during setup for easy identification in your dashboard.
+* **Extended Attributes:** Access to "Playlist Name", "Streaming Provider", and precise "Track Position/Duration" within Home Assistant.
 
 ## Installation
 
 ### Manual Installation
 1. Download this repository.
-2. Copy the `russound_media_player` folder into your Home Assistant `custom_components` directory.
+2. Copy the `russound_source` folder (or your chosen directory name) into your Home Assistant `custom_components` directory.
 3. Restart Home Assistant.
 
 ### Configuration
 1. Navigate to **Settings** > **Devices & Services**.
 2. Click **Add Integration** and search for **Russound Media Player**.
 3. Fill in the following details:
-   * **Host:** The IP address of your Russound device.
-   * **Port:** Default is `9621 or 9622`.
-   * **Source:** The source number you wish to control (e.g., `5`).
-   * **Name:** Your preferred display name (e.g., "Media Streamer").
+    * **Host:** The IP address of your Russound device.
+    * **Port:** Default is `9621` (Standard RIO port).
+    * **Source:** The source number you wish to control (e.g., `1`).
+    * **Name:** Your preferred display name (e.g., "Living Room Streamer").
+
+## Advanced Logic
+* **Queue-Based Communication:** Commands are processed through an internal queue (`cmd_q`) to prevent race conditions and ensure stability during network latency.
+* **Power Management:** The integration automatically manages TCP sessions, closing connections when the system is off and re-establishing them instantly when commands are sent.
+* **Playlist Transport Fallback:** If a source fails to report standard transport states, the integration can automatically apply playlist-based transport logic to maintain UI responsiveness.
 
 ## Supported Metadata Keys
-The integration pulls data from the Russound RIO Source GET Key Table, including:
-* `songName`, `artistName`, `albumName`
-* `coverArtURL`
-* `radioText`, `playlistName`, `channelName`
-* `playStatus`, `shuffleMode`, `repeatMode`
+The integration pulls data from the Russound RIO Source Key Table, including:
+* `SONGNAME`, `ARTISTNAME`, `ALBUMNAME`
+* `COVERARTURL`
+* `PLAYSTATUS`, `PLAYTIME`, `TRACKTIME`
+* `SHUFFLEMODE`, `REPEATMODE`
+* `SYSTEM.STATUS` (for power state synchronization)
 
 ---
 **Developed by [@horbye](https://github.com/horbye)**
